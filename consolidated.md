@@ -286,8 +286,9 @@ If the command `conda` is not found, checkout the [Troubleshooting Conda on a CA
 >
 > This is often the best option when your edit-run cycle is coarse-grained and you do not need an interactive remote editor attached to the node.
 
-> [!CAUTION]
+> [!CAUTION] Node usage etiquette
 > Do not hold a GPU-equipped compute node just to edit files, read documentation, or stay idle for long periods. If you are not actively using the allocated resources, exit the compute node and release the allocation so those GPUs return to the queue. Reserve the Remote-SSH workflow below for sessions where you genuinely need a tight loop of editing code -> running GPU-backed tests -> inspecting results -> editing code again -> ... .
+
 
 ## 6. Connect Cursor/VSCode to the compute node
 
@@ -493,3 +494,52 @@ You may also want a quick reference for available CARC GPU types:
 |      a40 | NVIDIA A40  | gpu, debug       | 2               |     10,752 | 48 GB GDDR6               |        37.4 |  not listed | $5.5k                       |
 |     v100 | NVIDIA V100 | gpu              | 2               |      5,120 | 32 GB HBM2                |        15.7 |         7.8 | $1.4k to $1.6k              |
 |     p100 | NVIDIA P100 | gpu, debug       | 2               |      3,584 | 16 GB HBM2                |         9.3 |         4.7 | $700                        |
+
+
+## 8. Runnig non-interactive jobs on CARC in batch
+
+The totorial above revolved around using CARC in an interactive mode via `salloc`. However, there are cases where you want to run a non-interactive job on CARC. Use `salloc` when you want an **interactive** allocation and plan to run commands yourself on the compute node. Use `sbatch` when you want Slurm to run a **batch script** for you once resources become available.
+
+The resource requests are similar in both cases: account, partition, time limit, CPUs, memory, and GPUs. The difference is that with `sbatch` you put those requests at the top of a shell script using `#SBATCH` directives, then submit the script from the login node.
+
+Run in: **Endeavour login node**
+
+```bash
+sbatch <your_batch_script>.sbatch
+```
+ 
+Example batch script:
+
+```bash
+#!/bin/bash
+#SBATCH --account=<your_endeavour_account>
+#SBATCH --partition=<your_endeavour_partition>
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --gpus=h200:1
+#SBATCH --mem=64G
+#SBATCH --time=1-00:00:00
+
+# Optional: submit 4 similar jobs at once. Remove this line if you only want one job.
+#SBATCH --array=0-3
+
+set -euo pipefail
+
+echo "Job ID: $SLURM_JOB_ID"
+echo "Array Task ID: ${SLURM_ARRAY_TASK_ID:-not_an_array_job}"
+echo "Running on host: $(hostname)"
+
+cd <your_project_path>
+
+# Choose one script per array index. This is only needed if you keep --array.
+scripts=("example0.py" "example1.py" "example2.py" "example3.py")
+python "${scripts[$SLURM_ARRAY_TASK_ID]}"
+```
+
+Notes:
+
+- `#SBATCH --array=0-3` creates 4 jobs with array indices `0`, `1`, `2`, and `3`.
+- Inside the script, Slurm exposes the current index as `SLURM_ARRAY_TASK_ID`.
+- If you only want one job, remove the `--array` line and replace the final `python ...` command with the exact command you want to run.
+- Submit with `sbatch train_job.sbatch`, check status with `squeue -u <your_usc_username>`, and inspect accounting data later with `sacct -j <job_id>`.
